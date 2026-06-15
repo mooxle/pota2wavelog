@@ -210,8 +210,8 @@ QSOs are grouped by locator and POTA ref. Two edge cases are handled automatical
 Station locations are named following the scheme recommended by [DB4SCW](https://db4scw.de):
 
 ```
-POTA DE-0034 Taunus JO40HJ Bad Homburg
-POTA DE-0028 + DE-1197 Spessart JN49PU Wintersbach
+POTA DE-0034 - Taunus - JO40HJ - Bad Homburg
+POTA DE-0028 + DE-1197 - Bayerischer Spessart - JN49PU - Eschau
 ```
 
 This makes stations uniquely findable in dropdown lists and the Wavelog search even when you have a large number of locations. The name can be edited before creation.
