@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+
+# Lokale Config / Secrets – die echte Config liegt in ~/.wavelog.conf
+.wavelog.conf
+
+# ADIF-Dateien zum Testen/Importieren – enthalten echte QSO-Daten
+*.adi
+*.adif
