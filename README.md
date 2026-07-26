@@ -129,7 +129,7 @@ Afterwards a summary is shown, letting you adjust the name, locator, or city bef
   POTA:     DE-0034
   DXCC:     FEDERAL REPUBLIC OF GERMANY (230)
   CQ/ITU:   14 / 28
-  QRZ.com:  enter API key manually after creation ⚠️
+  QRZ.com:  key will be set automatically (upload mode stays disabled — enable manually)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   [y] Create  [n] Cancel  [e] Name  [l] Locator  [c] City
@@ -237,7 +237,7 @@ Before creating a station the script compares the POTA refs and locator against 
 
 ### QRZ.com note
 
-The Wavelog API does not support passing a QRZ API key when creating a station via the API. The script displays a reminder — the key has to be entered once manually in the station setup dialog.
+If `qrz_api_key` is configured, it's sent along automatically when the station is created (Wavelog `create_station` API, `qrzapikey` field — requires Wavelog >2.5.1). The upload mode itself (Disabled / Enabled / Realtime) is left untouched by the API and stays a one-time manual step in the station setup dialog — the script prints a reminder after creation.
 
 ---
 
