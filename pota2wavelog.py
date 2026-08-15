@@ -579,10 +579,9 @@ def build_station_payload(cfg, pota_refs, park_data, locator, geo,
         "clublogignore":       "0",
         "hrdlogrealtime":      "0",
         # QRZ key: supported by create_station since Wavelog >2.5.1 (field
-        # "qrzapikey"). The upload mode itself (qrzrealtime: Disabled/
-        # Enabled/Realtime) stays a manual step — the official API example
-        # keeps it at "-1" even when a key is set, so we don't guess a mode.
-        "qrzrealtime":         "-1",
+        # "qrzapikey"). qrzrealtime: -1=Disabled, 0=Enabled, 1=Realtime.
+        # Enable upload (non-realtime) whenever a key is configured.
+        "qrzrealtime":         "0" if cfg.get("qrz_api_key") else "-1",
         "qrzapikey":           cfg.get("qrz_api_key", ""),
         "county":              None,
         "station_cnty":        "",
@@ -606,7 +605,7 @@ def confirm_station(payload: dict):
     print(f"  DXCC:     {payload['dxccname']} ({payload['station_dxcc']})")
     print(f"  CQ/ITU:   {payload['station_cq']} / {payload['station_itu']}")
     if payload.get("qrzapikey"):
-        print(f"  QRZ.com:  key will be set automatically (upload mode stays disabled — enable manually)")
+        print(f"  QRZ.com:  key + upload will be enabled automatically (non-realtime)")
     else:
         print(f"  QRZ.com:  no key configured")
     print("━" * 62)
@@ -740,8 +739,7 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
         # Look up station ID from station list (API does not return it directly)
         print(f"  ✅ Created: {confirmed['station_profile_name']}")
         if cfg.get("qrz_api_key"):
-            print(f"  ℹ️  QRZ key was set automatically. Upload is still disabled:")
-            print(f"     Wavelog → Edit station → QRZ.com → set upload to 'Enabled' (not real-time)")
+            print(f"  ℹ️  QRZ key set and upload enabled (non-realtime).")
         updated = get_existing_stations(cfg)
         # Find the most recently created station matching the POTA ref
         for s in reversed(updated):

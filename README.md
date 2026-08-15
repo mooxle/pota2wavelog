@@ -129,7 +129,7 @@ Afterwards a summary is shown, letting you adjust the name, locator, or city bef
   POTA:     DE-0034
   DXCC:     FEDERAL REPUBLIC OF GERMANY (230)
   CQ/ITU:   14 / 28
-  QRZ.com:  key will be set automatically (upload mode stays disabled — enable manually)
+  QRZ.com:  key + upload will be enabled automatically (non-realtime)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   [y] Create  [n] Cancel  [e] Name  [l] Locator  [c] City
@@ -233,11 +233,11 @@ For German callsigns (prefixes DA–DR) DXCC entity, CQ zone, and ITU zone are s
 
 ### Duplicate detection
 
-Before creating a station the script compares the POTA refs and locator against all existing stations in Wavelog. If a match is found you can import directly into the existing station instead of creating a new one.
+Before creating a station the script compares the POTA refs against all existing stations in Wavelog. A match on the POTA ref alone is not enough — if the existing station's locator is more than `--merge-distance` (default 5 km) away from the new one, it's treated as a different physical location (e.g. the same park visited from a different spot) and a new station is created instead of reusing the old one.
 
 ### QRZ.com note
 
-If `qrz_api_key` is configured, it's sent along automatically when the station is created (Wavelog `create_station` API, `qrzapikey` field — requires Wavelog >2.5.1). The upload mode itself (Disabled / Enabled / Realtime) is left untouched by the API and stays a one-time manual step in the station setup dialog — the script prints a reminder after creation.
+If `qrz_api_key` is configured, it's sent along automatically when the station is created (Wavelog `create_station` API, `qrzapikey` field — requires Wavelog >2.5.1) and the upload mode is set to **Enabled** (non-realtime) in the same call — no manual step required.
 
 ---
 
