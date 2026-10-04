@@ -253,6 +253,10 @@ QRZ keeps one logbook per callsign, so a key is only used for its own callsign:
 
 In the last case the confirmation step and the post-creation message tell you which option to add to `~/.wavelog.conf`. Add it later and stations created from then on pick it up; for an existing station enter the key in Wavelog (Edit station → QRZ.com).
 
+### Troubleshooting: station creation hangs / HTTP 502
+
+Observed with a Wavelog instance behind Cloudflare: `create_station` requests with a JSON body of roughly 900 bytes or more hang for ~50 s and end in `502 Bad gateway` without creating anything, while the same request at 834 bytes is answered in 0.1 s (other endpoints such as `api/qso` are fine at 1 KB+). Cause on the server side not identified. The script therefore sends only the fields that have a value, which keeps even long park names around 630 bytes, and warns if a body still exceeds 850 bytes. If creation fails with a 5xx, the script checks whether the station was created anyway and tells you; a rerun is safe.
+
 ---
 
 ## 📡 Data sources & attribution

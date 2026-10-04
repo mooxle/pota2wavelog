@@ -572,8 +572,17 @@ def check_duplicate(existing: list, pota_refs: list, callsign: str,
 
 def create_station(cfg: dict, payload: dict) -> tuple:
     url = f"{cfg['url']}/index.php/api/create_station/{cfg['api_key']}"
+    # Send only fields that carry a value. Wavelog's create_station was seen to
+    # hang (Cloudflare 502 after ~50 s, nothing created) for JSON bodies of
+    # ~900 bytes and more, while 834 bytes went through in 0.1 s. The full field
+    # set with a long park name reaches ~900; without the empty fields it is
+    # ~630. Omitted fields fall back to Wavelog's defaults (verified).
+    slim = {k: v for k, v in payload.items() if v not in ("", None)}
+    size = len(json.dumps([slim]).encode())
+    if size > 850:
+        print(f"  ⚠️  Request body is {size} bytes — create_station may hang above ~900.")
     print(f"  → Wavelog: creating station...")
-    return http_post(url, [payload], timeout=60)
+    return http_post(url, [slim], timeout=60)
 
 # ---------------------------------------------------------------------------
 # Build station payload
