@@ -830,17 +830,22 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
 
     print("\n  Creating station...")
     status, response = create_station(cfg, confirmed)
-    if status == 0:
-        # No answer (timeout / dropped connection): Wavelog may still have
-        # created the station, so look before reporting a failure.
-        print(f"  ⚠️  No response from Wavelog ({response.get('error', 'unknown error')})")
+    if status == 0 or status >= 500:
+        # No usable answer (timeout, dropped connection, 5xx from Wavelog or a
+        # proxy like Cloudflare): the server may still have created the
+        # station, so look before reporting a failure.
+        why = response.get("error") or response.get("title") or f"HTTP {status}"
+        print(f"  ⚠️  No usable answer from Wavelog ({why})")
+        print(f"     Response: {str(response)[:300]}")
         print(f"     Checking whether the station was created anyway...")
         match = next((s for s in get_existing_stations(cfg)
                       if s.get("station_profile_name") == confirmed["station_profile_name"]), None)
         if match:
             print(f"  ✅ Station exists after all → ID {match.get('station_id')}")
             return match.get("station_id")
-        print(f"  ✗ Not created. Nothing was left behind — just run the same command again.")
+        print(f"  ✗ Not created. Nothing was left behind, so a rerun is safe.")
+        print(f"     If it fails the same way again, the problem is on the Wavelog server")
+        print(f"     (check its PHP / web server log for this request).")
         return None
     if status == 201:
         # Look up station ID from station list (API does not return it directly)
