@@ -33,6 +33,7 @@ import sys
 import uuid
 from pathlib import Path
 
+import http.client
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -198,7 +199,13 @@ def http_get(url: str, timeout: int = 10):
         return json.loads(r.read().decode())
 
 
-def http_post(url: str, payload, timeout: int = 10) -> tuple:
+def http_post(url: str, payload, timeout: int = 30) -> tuple:
+    """
+    POST JSON. Returns (http_status, body). If there is no usable answer at all
+    (timeout, connection dropped, non-JSON reply) it returns (0, {"error": ...})
+    instead of raising — the request may or may not have been processed, so
+    callers must not assume failure means "nothing happened".
+    """
     data = json.dumps(payload).encode()
     req  = urllib.request.Request(url, data=data, method="POST", headers={
         "Content-Type": "application/json",
@@ -212,6 +219,8 @@ def http_post(url: str, payload, timeout: int = 10) -> tuple:
         try:    body = json.loads(e.read().decode())
         except: body = {}
         return e.code, body
+    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as e:
+        return 0, {"error": f"{type(e).__name__}: {e}"}
 
 # ---------------------------------------------------------------------------
 # Maidenhead locator
@@ -564,7 +573,7 @@ def check_duplicate(existing: list, pota_refs: list, callsign: str,
 def create_station(cfg: dict, payload: dict) -> tuple:
     url = f"{cfg['url']}/index.php/api/create_station/{cfg['api_key']}"
     print(f"  → Wavelog: creating station...")
-    return http_post(url, [payload])
+    return http_post(url, [payload], timeout=60)
 
 # ---------------------------------------------------------------------------
 # Build station payload
@@ -821,6 +830,18 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
 
     print("\n  Creating station...")
     status, response = create_station(cfg, confirmed)
+    if status == 0:
+        # No answer (timeout / dropped connection): Wavelog may still have
+        # created the station, so look before reporting a failure.
+        print(f"  ⚠️  No response from Wavelog ({response.get('error', 'unknown error')})")
+        print(f"     Checking whether the station was created anyway...")
+        match = next((s for s in get_existing_stations(cfg)
+                      if s.get("station_profile_name") == confirmed["station_profile_name"]), None)
+        if match:
+            print(f"  ✅ Station exists after all → ID {match.get('station_id')}")
+            return match.get("station_id")
+        print(f"  ✗ Not created. Nothing was left behind — just run the same command again.")
+        return None
     if status == 201:
         # Look up station ID from station list (API does not return it directly)
         print(f"  ✅ Created: {confirmed['station_profile_name']}")
