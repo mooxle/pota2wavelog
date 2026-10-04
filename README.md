@@ -38,6 +38,10 @@ api_key      = abc123...
 callsign     = DB4SCW
 home_locator = JN49OR
 qrz_api_key  = xyz789...
+
+# Optional: one key per callsign (see "QRZ.com note" below).
+# Option name = qrz_api_key_ + callsign in lowercase, "/" replaced by "_"
+qrz_api_key_s5_da6max = abc456...
 ```
 
 | Variable | Description |
@@ -229,7 +233,7 @@ This makes stations uniquely findable in dropdown lists and the Wavelog search e
 
 ### DXCC auto-fill
 
-For German callsigns (prefixes DA–DR) DXCC entity, CQ zone, and ITU zone are set automatically. For all other callsigns Wavelog determines the values itself during import.
+The DXCC entity is taken from the **park**, not from your callsign: the POTA API's `entityId` is the DXCC entity number, so a station for `SI-0001` gets Slovenia (499) whether you operate as `DA6MAX` or `S5/DA6MAX`. CQ and ITU zones are filled in for Germany and a few neighbouring countries with a single zone each (AT, CH, CZ, HR, HU, IT, PL, SI, SK); for other entities they are left empty. Only if the POTA API returns no park data does the script fall back to the callsign (German calls → Germany, anything else → empty).
 
 ### Duplicate detection
 
@@ -237,7 +241,17 @@ Before creating a station the script compares the POTA refs against all existing
 
 ### QRZ.com note
 
-If `qrz_api_key` is configured, it's sent along automatically when the station is created (Wavelog `create_station` API, `qrzapikey` field — requires Wavelog >2.5.1) and the upload mode is set to **Enabled** (non-realtime) in the same call — no manual step required.
+If a QRZ key is available for the station's callsign, it's sent along automatically when the station is created (Wavelog `create_station` API, `qrzapikey` field — requires Wavelog >2.5.1) and the upload mode is set to **Enabled** (non-realtime) in the same call — no manual step required.
+
+QRZ keeps one logbook per callsign, so a key is only used for its own callsign:
+
+| Callsign you operate as | Key used |
+|---|---|
+| your configured `callsign` (also `/P`, `/M`, `/QRP`, `/A`, `/MM` variants) | `qrz_api_key` |
+| any callsign with its own `qrz_api_key_<call>` option, e.g. `S5/DA6MAX` | that option |
+| anything else | none — station is created with upload **disabled** |
+
+In the last case the confirmation step and the post-creation message tell you which option to add to `~/.wavelog.conf`. Add it later and stations created from then on pick it up; for an existing station enter the key in Wavelog (Edit station → QRZ.com).
 
 ---
 

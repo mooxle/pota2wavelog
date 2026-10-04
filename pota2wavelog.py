@@ -18,6 +18,9 @@ ADIF mode creates the station AND imports all QSOs in one step.
 Configuration (searched in this order):
   1. Environment variables: WAVELOG_URL, WAVELOG_API_KEY, WAVELOG_CALLSIGN
   2. ~/.wavelog.conf  (INI format, section [wavelog])
+
+QRZ keys: qrz_api_key belongs to the configured callsign; other callsigns
+(e.g. S5/DA6MAX) need their own option qrz_api_key_s5_da6max.
 """
 
 import argparse
@@ -44,6 +47,21 @@ DXCC_DE = {
     "dxccprefix":   "DL",
     "station_cq":   "14",
     "station_itu":  "28",
+}
+
+# CQ / ITU zones for entities that lie entirely in one zone, keyed by DXCC
+# entity number (= POTA entityId). Convenience table only — entities not listed
+# get empty zones. Germany is handled by DXCC_DE.
+ENTITY_ZONES = {
+    206: ("15", "28"),  # Austria
+    239: ("15", "28"),  # Hungary
+    248: ("15", "28"),  # Italy
+    269: ("15", "28"),  # Poland
+    287: ("14", "28"),  # Switzerland
+    497: ("15", "28"),  # Croatia
+    499: ("15", "28"),  # Slovenia
+    503: ("15", "28"),  # Czech Republic
+    504: ("15", "28"),  # Slovak Republic
 }
 
 # Maps both English and German state names (as returned by Nominatim) to
@@ -76,6 +94,7 @@ def load_config() -> dict:
         "callsign":     os.environ.get("WAVELOG_CALLSIGN",     ""),
         "home_locator": os.environ.get("WAVELOG_HOME_LOCATOR", ""),
         "qrz_api_key":  os.environ.get("WAVELOG_QRZ_API_KEY",  ""),
+        "qrz_keys":     {},   # per-callsign QRZ keys: {"S5/DA6MAX": "..."}
     }
     conf_path = Path.home() / ".wavelog.conf"
     if conf_path.exists():
@@ -88,7 +107,42 @@ def load_config() -> dict:
             cfg["callsign"]     = cfg["callsign"]     or p.get(s, "callsign",     fallback="")
             cfg["home_locator"] = cfg["home_locator"] or p.get(s, "home_locator", fallback="")
             cfg["qrz_api_key"]  = cfg["qrz_api_key"]  or p.get(s, "qrz_api_key",  fallback="")
+            # Optional per-callsign keys: qrz_api_key_s5_da6max = ...  → "S5/DA6MAX"
+            # (same convention as wavelog-qrz-reconcile)
+            for opt, val in p.items(s):
+                if opt.startswith("qrz_api_key_") and val.strip():
+                    call = opt[len("qrz_api_key_"):].upper().replace("_", "/", 1)
+                    cfg["qrz_keys"][call] = val.strip()
     return cfg
+
+
+def strip_portable(callsign: str) -> str:
+    """DA6MAX/P → DA6MAX (portable suffixes share the base callsign's QRZ book)."""
+    cs = callsign.upper().strip()
+    if cs.endswith(("/P", "/M", "/QRP", "/A", "/MM")):
+        cs = cs.rsplit("/", 1)[0]
+    return cs
+
+
+def qrz_option_name(callsign: str) -> str:
+    """S5/DA6MAX → qrz_api_key_s5_da6max (the ~/.wavelog.conf option name)."""
+    return "qrz_api_key_" + strip_portable(callsign).lower().replace("/", "_")
+
+
+def qrz_key_for(cfg: dict, callsign: str) -> str:
+    """
+    QRZ logbook key for this callsign. QRZ keeps one logbook per callsign, so a
+    key must never be reused for a different one:
+      1. a per-callsign key (qrz_api_key_<call>) wins
+      2. the main qrz_api_key applies only to the main (configured) callsign
+      3. otherwise "" — the station is created without a key and without upload
+    """
+    cs   = strip_portable(callsign)
+    keys = cfg.get("qrz_keys", {})
+    if cs in keys:
+        return keys[cs]
+    main = strip_portable(cfg.get("main_callsign") or cfg.get("callsign", ""))
+    return cfg.get("qrz_api_key", "") if cs == main else ""
 
 
 def save_config(cfg: dict):
@@ -516,6 +570,29 @@ def create_station(cfg: dict, payload: dict) -> tuple:
 # Build station payload
 # ---------------------------------------------------------------------------
 
+def dxcc_from_park(park_data: dict) -> dict:
+    """
+    DXCC fields for the station location, taken from the park itself: the POTA
+    API's entityId is the DXCC entity number (SI-0001 → 499 Slovenia). This is
+    where the station is operated, so it is right for any callsign — DA6MAX in
+    Slovenia as well as S5/DA6MAX. Returns {} if the park has no entity.
+    """
+    try:
+        entity = int(park_data.get("entityId"))
+    except (TypeError, ValueError):
+        return {}
+    if entity == 230:
+        return dict(DXCC_DE)
+    cq, itu = ENTITY_ZONES.get(entity, ("", ""))
+    return {
+        "station_dxcc": str(entity),
+        "dxccname":     (park_data.get("entityName") or "").upper(),
+        "dxccprefix":   "",
+        "station_cq":   cq,
+        "station_itu":  itu,
+    }
+
+
 def build_station_payload(cfg, pota_refs, park_data, locator, geo,
                            link_logbook=True, adif_meta=None) -> dict:
     refs_str   = " + ".join(pota_refs)
@@ -527,22 +604,28 @@ def build_station_payload(cfg, pota_refs, park_data, locator, geo,
     parts.append(locator)
     if city:      parts.append(city)
 
-    # Determine DXCC from callsign — more reliable than the ADIF DXCC field
-    # (the ADIF field belongs to the contact, not to our own station).
+    # DXCC: primarily from the park's POTA entity (where we operate). The ADIF
+    # DXCC field is no use here — it belongs to the contact, not to our station.
+    dxcc = dxcc_from_park(park_data)
+
     callsign = cfg.get("callsign", "").upper()
-    # German callsigns: DA-DR prefix (including /P suffixes like LA/DA6MAX)
-    base_call   = callsign.split("/")[0]  # LA/DA6MAX → DA6MAX
+    qrz_key  = qrz_key_for(cfg, callsign)
+    # Fallback (no park data): decide by callsign. For DA6MAX/P the first part
+    # is the call itself; for prefix calls like S5/DA6MAX it is the operating
+    # prefix (S5) — so only German calls and German-prefixed calls count here.
+    base_call   = callsign.split("/")[0]
     call_prefix = base_call[:2]
     is_germany  = call_prefix in (
         "DA","DB","DC","DD","DE","DF","DG","DH","DI",
         "DJ","DK","DL","DM","DN","DO","DP","DQ","DR"
     )
 
-    if is_germany:
+    if dxcc:
+        pass
+    elif is_germany:
         dxcc = dict(DXCC_DE)
     else:
-        # Non-Germany: leave DXCC fields empty; Wavelog resolves from callsign
-        # during import.
+        # Non-Germany and no park data: leave DXCC fields empty.
         dxcc = {
             "station_dxcc":  adif_meta.get("dxcc", "") if adif_meta else "",
             "dxccname":      adif_meta.get("country", "").upper() if adif_meta else "",
@@ -580,9 +663,10 @@ def build_station_payload(cfg, pota_refs, park_data, locator, geo,
         "hrdlogrealtime":      "0",
         # QRZ key: supported by create_station since Wavelog >2.5.1 (field
         # "qrzapikey"). qrzrealtime: -1=Disabled, 0=Enabled, 1=Realtime.
-        # Enable upload (non-realtime) whenever a key is configured.
-        "qrzrealtime":         "0" if cfg.get("qrz_api_key") else "-1",
-        "qrzapikey":           cfg.get("qrz_api_key", ""),
+        # Enable upload (non-realtime) only if there is a key for THIS callsign
+        # (see qrz_key_for) — never switch on an upload with another call's key.
+        "qrzrealtime":         "0" if qrz_key else "-1",
+        "qrzapikey":           qrz_key,
         "county":              None,
         "station_cnty":        "",
     }
@@ -607,7 +691,9 @@ def confirm_station(payload: dict):
     if payload.get("qrzapikey"):
         print(f"  QRZ.com:  key + upload will be enabled automatically (non-realtime)")
     else:
-        print(f"  QRZ.com:  no key configured")
+        opt = qrz_option_name(payload["station_callsign"])
+        print(f"  QRZ.com:  no key for {payload['station_callsign']} — upload stays disabled")
+        print(f"            (add {opt} to ~/.wavelog.conf)")
     print("━" * 62)
     print()
     while True:
@@ -738,8 +824,12 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
     if status == 201:
         # Look up station ID from station list (API does not return it directly)
         print(f"  ✅ Created: {confirmed['station_profile_name']}")
-        if cfg.get("qrz_api_key"):
+        if confirmed.get("qrzapikey"):
             print(f"  ℹ️  QRZ key set and upload enabled (non-realtime).")
+        else:
+            print(f"  ℹ️  No QRZ key for {confirmed['station_callsign']} — upload is disabled. "
+                  f"Add {qrz_option_name(confirmed['station_callsign'])} to ~/.wavelog.conf "
+                  f"and set key + upload in Wavelog (Edit station → QRZ.com).")
         updated = get_existing_stations(cfg)
         # Find the most recently created station matching the POTA ref
         for s in reversed(updated):
@@ -1026,6 +1116,7 @@ def main():
 
     args = p.parse_args()
     cfg  = ensure_config(load_config())
+    cfg["main_callsign"] = cfg["callsign"]   # the call the main qrz_api_key belongs to
 
     if args.adif:
         adif_path = Path(args.adif)
