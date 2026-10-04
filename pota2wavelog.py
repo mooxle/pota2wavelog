@@ -341,8 +341,11 @@ def extract_activations_from_adif(filepath: str,
     Locator conflict logic:
       Home locator detection:
         If a locator matches the home QTH but contains POTA QSOs, it is
-        flagged as a GPS failure. If a real GPS locator exists for the same
-        activation in the same file, it is preferred automatically.
+        either a GPS failure or a real activation from home (park right at
+        your doorstep). If a real GPS locator exists for the same activation
+        in the same file, it is a GPS failure and the real locator is
+        preferred automatically. Otherwise you are asked; a home activation is
+        flagged ("home_activation") so process_parks lets you pick the station.
 
       Distance-based merge logic (applied after home cleanup):
         1. Distance ≤ merge_distance_km AND same POTA refs  → suggest GPS drift merge
@@ -376,6 +379,7 @@ def extract_activations_from_adif(filepath: str,
                 "ituz":             qso["ITUZ"],
                 "count":            0,
                 "is_home_fallback": bool(home and loc == home),
+                "home_activation":  False,
             }
         groups[loc]["refs"].update(refs)
         groups[loc]["count"] += 1
@@ -405,12 +409,20 @@ def extract_activations_from_adif(filepath: str,
             groups[best]["count"] += groups[home]["count"]
             del groups[home]
         else:
-            # No other locator found → warn but continue
+            # No other locator in this file → either a real activation from home
+            # (park right at the doorstep) or a GPS failure: ask.
             print()
             print(f"  ⚠️  Home QTH locator detected: {home}")
-            print(f"     All {home_count} QSOs were logged with home locator (no GPS fix).")
-            print(f"     No alternative GPS locator found in this file.")
-            print(f"     → Locator must be corrected manually (step 2/4).")
+            print(f"     {home_count} QSOs were logged with the home locator.")
+            answer = input("     Was this an activation from your home QTH "
+                           "(park right at your doorstep)? [Y/n] ").strip().lower()
+            if answer != "n":
+                # Deliberate home activation → not a GPS failure
+                groups[home]["is_home_fallback"] = False
+                groups[home]["home_activation"]  = True
+                print(f"     → Home activation. You choose the station in step 4/4.")
+            else:
+                print(f"     → Treated as GPS failure — locator must be corrected manually (step 2/4).")
 
     if len(groups) == 1:
         g = list(groups.values())[0]
@@ -418,7 +430,8 @@ def extract_activations_from_adif(filepath: str,
                  "date": g["date"], "callsign": g["callsign"],
                  "dxcc": g["dxcc"], "country": g["country"],
                  "cqz":  g["cqz"],  "ituz":    g["ituz"],
-                 "qso_count": g["count"]}]
+                 "qso_count":       g["count"],
+                 "home_activation": g.get("home_activation", False)}]
 
     # Step 2: Check pairs and collect merge decisions.
     locators = list(groups.keys())
@@ -512,10 +525,14 @@ def extract_activations_from_adif(filepath: str,
                 "ituz":            g["ituz"],
                 "count":           0,
                 "locators_merged": [],
+                "home_activation": False,
             }
         merged[root]["refs"].update(g["refs"])
         merged[root]["count"] += g["count"]
         merged[root]["locators_merged"].append(loc)
+        # a merged activation counts as home activation if any member was one
+        merged[root]["home_activation"] = (merged[root]["home_activation"]
+                                           or g.get("home_activation", False))
         # propagate winner from child nodes if set
         if "_winner" in groups[root]:
             merged[root]["locator"] = groups[root]["_winner"]
@@ -532,6 +549,7 @@ def extract_activations_from_adif(filepath: str,
             "cqz":       g["cqz"],
             "ituz":      g["ituz"],
             "qso_count": g["count"],
+            "home_activation": g.get("home_activation", False),
         }
         if len(g["locators_merged"]) > 1:
             act["merged_from"] = sorted(g["locators_merged"])
@@ -737,8 +755,53 @@ def confirm_station(payload: dict):
 # Core processing
 # ---------------------------------------------------------------------------
 
+def _ask_home_station_choice(existing_stations: list, locator: str,
+                             pota_refs: list) -> str:
+    """
+    Home activation (park right at the home QTH): ask which station gets the QSOs.
+
+    Returns "new" (create a POTA station) or the station_id of an existing one:
+      - home stations:  same locator, no POTA ref set in the profile
+      - POTA stations already created for these refs at this locator
+        (e.g. from an earlier run, so a rerun doesn't create a second one)
+    """
+    loc6 = locator.upper()[:6]
+    home_stns = [
+        s for s in existing_stations
+        if not (s.get("station_pota") or "").strip()
+        and (s.get("station_gridsquare") or "").upper()[:6] == loc6
+    ]
+    home_ids  = {str(s.get("station_id")) for s in home_stns}
+    pota_stns = [s for s in check_duplicate(existing_stations, pota_refs, "",
+                                            new_locator=locator)
+                 if str(s.get("station_id")) not in home_ids]
+
+    refs_str = ", ".join(pota_refs)
+    options  = {"1": "new"}
+    print()
+    print(f"  ┌─ Home activation ─────────────────────────────────────────")
+    print(f"  │  Locator {locator} is your home QTH.")
+    print(f"  │  POTA refs: {refs_str}")
+    print(f"  │")
+    print(f"  │  [1] Create a new POTA station  ({refs_str} @ {locator})")
+    for kind, stations in (("home station", home_stns), ("existing POTA station", pota_stns)):
+        for s in stations:
+            key = str(len(options) + 1)
+            options[key] = str(s.get("station_id"))
+            print(f"  │  [{key}] Import into {kind}: [{s.get('station_id')}] "
+                  f"{s.get('station_profile_name')}")
+    print(f"  └───────────────────────────────────────────────────────────")
+
+    while True:
+        choice = input(f"  Choice [{'/'.join(options)}]: ").strip()
+        if choice in options:
+            return options[choice]
+        print(f"  Please enter one of: {', '.join(options)}")
+
+
 def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
-                  adif_meta=None, existing_stations=None) -> bool:
+                  adif_meta=None, existing_stations=None,
+                  home_activation=False) -> bool:
     print()
     print(f"▶  POTA: {' + '.join(pota_refs)}")
 
@@ -800,13 +863,22 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
         geo = {"city": "", "state_code": "", "state_name": "", "country": ""}
         geo["city"] = input("       Enter city manually: ").strip()
 
-    # 4. Duplicate check
-    print(f"\n  [4/4] Duplicate check...")
+    # 4. Station selection (home activation) or duplicate check
     if existing_stations is None:
         existing_stations = get_existing_stations(cfg)
-    dupes = check_duplicate(existing_stations, pota_refs, cfg["callsign"],
-                            new_locator=locator)
     existing_station_id = None
+    if home_activation:
+        print(f"\n  [4/4] Station selection (home activation)...")
+        choice = _ask_home_station_choice(existing_stations, locator, pota_refs)
+        if choice != "new":
+            print(f"  → Using station ID: {choice}")
+            return choice
+        # "new": the user chose explicitly → no duplicate check, create below
+        dupes = []
+    else:
+        print(f"\n  [4/4] Duplicate check...")
+        dupes = check_duplicate(existing_stations, pota_refs, cfg["callsign"],
+                                new_locator=locator)
     if dupes:
         print(f"  ⚠️  Station already exists:")
         for d in dupes:
@@ -822,7 +894,7 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
             # Use the ID of the first match (user confirmed)
             existing_station_id = dupes[0].get("station_id")
             print(f"  → Using station ID: {existing_station_id}")
-    else:
+    elif not home_activation:
         print("       ✓ No duplicates")
 
     # Station already known → return ID directly, skip creation
@@ -1036,9 +1108,10 @@ def adif_mode(cfg, adif_path, manual_locator="",
     for i, act in enumerate(activations, 1):
         refs_str = " + ".join(act["refs"])
         nfer     = f"  ⚡ {len(act['refs'])}-fer" if len(act["refs"]) > 1 else ""
+        home_tag = "  🏠 home activation" if act.get("home_activation") else ""
         merged   = (f"  [merged from: {', '.join(act['merged_from'])}]"
                     if act.get("merged_from") else "")
-        print(f"\n  [{i}] {refs_str}{nfer}")
+        print(f"\n  [{i}] {refs_str}{nfer}{home_tag}")
         print(f"       Locator: {act['locator']}  |  QSOs: {act['qso_count']}"
               f"  |  Date: {act['date']}{merged}")
 
@@ -1071,6 +1144,7 @@ def adif_mode(cfg, adif_path, manual_locator="",
             adif_locator=loc,
             adif_meta=adif_meta,
             existing_stations=existing,
+            home_activation=act.get("home_activation", False),
         )
         if station_id is not None:
             ok += 1

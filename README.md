@@ -169,6 +169,32 @@ QSOs are grouped by locator and POTA ref. Two edge cases are handled automatical
 
 **Home QTH detection:** If Polo had no GPS fix and wrote your home locator instead, the script detects this automatically — provided `home_locator` is configured — and replaces it with the real GPS locator found elsewhere in the same file.
 
+**Home activations:** Some parks are right at your doorstep, so the activation really happens at your home locator. If POTA QSOs carry the home locator and there is *no other* locator for the same refs in the file, the script can't tell a GPS failure from a real home activation, so it asks:
+
+```
+  ⚠️  Home QTH locator detected: JN49OR
+     23 QSOs were logged with the home locator.
+     Was this an activation from your home QTH (park right at your doorstep)? [Y/n]
+```
+
+- **Y** (default): treated as a home activation, marked `🏠 home activation` in the list, and the locator is kept. Instead of the usual duplicate check, step 4/4 lets you pick where the QSOs go:
+
+  ```
+  ┌─ Home activation ─────────────────────────────────────────
+  │  Locator JN49OR is your home QTH.
+  │  POTA refs: DE-0034
+  │
+  │  [1] Create a new POTA station  (DE-0034 @ JN49OR)
+  │  [2] Import into home station: [3] Home DB4SCW
+  │  [3] Import into existing POTA station: [9] POTA DE-0034 - … - JN49OR - …
+  └───────────────────────────────────────────────────────────
+  ```
+
+  *Home stations* are existing stations at the same locator without a POTA ref; existing POTA stations for these refs are offered too, so rerunning the import doesn't create a second one. QSOs keep their `MY_POTA_REF`, so POTA data stays intact in a home station.
+- **n**: treated as a GPS failure, as before — correct the locator by hand in step 2/4.
+
+If the file also contains the real GPS locator for the same refs, none of this is asked: the home QSOs are reassigned automatically.
+
 ```
   ADIF import: activation.adi
   Merge distance: 5 km
