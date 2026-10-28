@@ -25,7 +25,7 @@ On first run the script asks interactively for your credentials and optionally s
 ```
 Wavelog URL (e.g. https://log.example.com): https://my-wavelog.net
 Wavelog API key: abc123...
-Station callsign (e.g. DA6MAX): DB4SCW
+Station callsign (e.g. DB4SCW): DB4SCW
 Your home QTH locator (e.g. JO40JG, Enter to skip): JN49OR
 ```
 
@@ -37,11 +37,11 @@ url          = https://my-wavelog.net
 api_key      = abc123...
 callsign     = DB4SCW
 home_locator = JN49OR
-qrz_api_key  = xyz789...
 
-# Optional: one key per callsign (see "QRZ.com note" below).
+# QRZ logbook keys: one per callsign (see "QRZ.com note" below).
 # Option name = qrz_api_key_ + callsign in lowercase, "/" replaced by "_"
-qrz_api_key_s5_da6max = abc456...
+qrz_api_key_db4scw    = xyz789...
+qrz_api_key_s5_db4scw = abc456...
 ```
 
 | Variable | Description |
@@ -50,7 +50,7 @@ qrz_api_key_s5_da6max = abc456...
 | `WAVELOG_API_KEY` | Wavelog API key |
 | `WAVELOG_CALLSIGN` | Your station callsign |
 | `WAVELOG_HOME_LOCATOR` | Home QTH locator (for GPS fallback detection) |
-| `WAVELOG_QRZ_API_KEY` | QRZ.com logbook API key (optional) |
+| `WAVELOG_QRZ_API_KEY` | QRZ.com logbook key of your main callsign (optional; the config option `qrz_api_key_<call>` is preferred) |
 
 ### 3. Run
 
@@ -273,8 +273,8 @@ QRZ keeps one logbook per callsign, so a key is only used for its own callsign:
 
 | Callsign you operate as | Key used |
 |---|---|
-| your configured `callsign` (also `/P`, `/M`, `/QRP`, `/A`, `/MM` variants) | `qrz_api_key` |
-| any callsign with its own `qrz_api_key_<call>` option, e.g. `S5/DA6MAX` | that option |
+| any callsign with its own `qrz_api_key_<call>` option, e.g. `DB4SCW` or `S5/DB4SCW` (`/P`, `/M`, `/QRP`, `/A`, `/MM` share the base call's key) | that option |
+| your configured `callsign`, if only a bare `qrz_api_key` exists (legacy) | `qrz_api_key` |
 | anything else | none — station is created with upload **disabled** |
 
 In the last case the confirmation step and the post-creation message tell you which option to add to `~/.wavelog.conf`. Add it later and stations created from then on pick it up; for an existing station enter the key in Wavelog (Edit station → QRZ.com).

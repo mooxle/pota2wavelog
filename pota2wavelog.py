@@ -107,9 +107,10 @@ def load_config() -> dict:
             cfg["api_key"]      = cfg["api_key"]      or p.get(s, "api_key",      fallback="")
             cfg["callsign"]     = cfg["callsign"]     or p.get(s, "callsign",     fallback="")
             cfg["home_locator"] = cfg["home_locator"] or p.get(s, "home_locator", fallback="")
+            # Legacy: bare qrz_api_key = key of the main callsign (still honoured)
             cfg["qrz_api_key"]  = cfg["qrz_api_key"]  or p.get(s, "qrz_api_key",  fallback="")
-            # Optional per-callsign keys: qrz_api_key_s5_da6max = ...  → "S5/DA6MAX"
-            # (same convention as wavelog-qrz-reconcile)
+            # Per-callsign keys: qrz_api_key_da6max, qrz_api_key_s5_da6max = ...
+            # → "DA6MAX", "S5/DA6MAX" (same convention as wavelog-qrz-reconcile)
             for opt, val in p.items(s):
                 if opt.startswith("qrz_api_key_") and val.strip():
                     call = opt[len("qrz_api_key_"):].upper().replace("_", "/", 1)
@@ -134,8 +135,8 @@ def qrz_key_for(cfg: dict, callsign: str) -> str:
     """
     QRZ logbook key for this callsign. QRZ keeps one logbook per callsign, so a
     key must never be reused for a different one:
-      1. a per-callsign key (qrz_api_key_<call>) wins
-      2. the main qrz_api_key applies only to the main (configured) callsign
+      1. the per-callsign key qrz_api_key_<call> wins
+      2. legacy: a bare qrz_api_key applies only to the main (configured) callsign
       3. otherwise "" — the station is created without a key and without upload
     """
     cs   = strip_portable(callsign)
@@ -157,7 +158,13 @@ def save_config(cfg: dict):
     p.set("wavelog", "api_key",      cfg["api_key"])
     p.set("wavelog", "callsign",     cfg["callsign"])
     p.set("wavelog", "home_locator", cfg.get("home_locator", ""))
-    p.set("wavelog", "qrz_api_key",  cfg.get("qrz_api_key",  ""))
+    # QRZ keys are stored per callsign (qrz_api_key_<call>); the legacy bare
+    # qrz_api_key is migrated to the main callsign's option.
+    main = strip_portable(cfg["callsign"])
+    key  = qrz_key_for(cfg, cfg["callsign"])
+    if key:
+        p.set("wavelog", qrz_option_name(main), key)
+        p.remove_option("wavelog", "qrz_api_key")
     with open(conf_path, "w") as f:
         p.write(f)
     print(f"  ✓ Saved: {conf_path}")
@@ -179,10 +186,10 @@ def ensure_config(cfg: dict) -> dict:
         if hl:
             cfg["home_locator"] = hl
             changed = True
-    if not cfg["qrz_api_key"]:
-        qrz = input("QRZ.com logbook API key (Enter to skip): ").strip()
+    if not qrz_key_for(cfg, cfg["callsign"]):
+        qrz = input(f"QRZ.com logbook API key for {cfg['callsign']} (Enter to skip): ").strip()
         if qrz:
-            cfg["qrz_api_key"] = qrz
+            cfg["qrz_keys"][strip_portable(cfg["callsign"])] = qrz
             changed = True
     if changed and input("Save to ~/.wavelog.conf? [y/N] ").strip().lower() == "y":
         save_config(cfg)
@@ -1186,13 +1193,13 @@ def interactive_mode(cfg):
             "or 'q' to quit: "
         ).strip()
         if entry.lower() in ("q", "quit", "exit"):
-            print("73 de DA6MAX"); break
+            print(f"73 de {cfg['callsign']}"); break
         refs = [r.strip().upper().replace("POTA ","")
                 for r in entry.replace(",", " ").split() if r.strip()]
         if not refs: continue
         process_parks(cfg, refs)
         if input("\nCreate another station? [y/n] ").strip().lower() == "n":
-            print("73 de DA6MAX"); break
+            print(f"73 de {cfg['callsign']}"); break
 
 # ---------------------------------------------------------------------------
 # CLI
