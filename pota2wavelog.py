@@ -20,7 +20,7 @@ Configuration (searched in this order):
   2. ~/.wavelog.conf  (INI format, section [wavelog])
 
 QRZ keys: qrz_api_key belongs to the configured callsign; other callsigns
-(e.g. S5/DA6MAX) need their own option qrz_api_key_s5_da6max.
+(e.g. S5/DM6AX) need their own option qrz_api_key_s5_dm6ax.
 """
 
 import argparse
@@ -95,7 +95,7 @@ def load_config() -> dict:
         "callsign":     os.environ.get("WAVELOG_CALLSIGN",     ""),
         "home_locator": os.environ.get("WAVELOG_HOME_LOCATOR", ""),
         "qrz_api_key":  os.environ.get("WAVELOG_QRZ_API_KEY",  ""),
-        "qrz_keys":     {},   # per-callsign QRZ keys: {"S5/DA6MAX": "..."}
+        "qrz_keys":     {},   # per-callsign QRZ keys: {"S5/DM6AX": "..."}
     }
     conf_path = Path.home() / ".wavelog.conf"
     if conf_path.exists():
@@ -109,8 +109,8 @@ def load_config() -> dict:
             cfg["home_locator"] = cfg["home_locator"] or p.get(s, "home_locator", fallback="")
             # Legacy: bare qrz_api_key = key of the main callsign (still honoured)
             cfg["qrz_api_key"]  = cfg["qrz_api_key"]  or p.get(s, "qrz_api_key",  fallback="")
-            # Per-callsign keys: qrz_api_key_da6max, qrz_api_key_s5_da6max = ...
-            # → "DA6MAX", "S5/DA6MAX" (same convention as wavelog-qrz-reconcile)
+            # Per-callsign keys: qrz_api_key_dm6ax, qrz_api_key_s5_dm6ax = ...
+            # → "DM6AX", "S5/DM6AX" (same convention as wavelog-qrz-reconcile)
             for opt, val in p.items(s):
                 if opt.startswith("qrz_api_key_") and val.strip():
                     call = opt[len("qrz_api_key_"):].upper().replace("_", "/", 1)
@@ -119,7 +119,7 @@ def load_config() -> dict:
 
 
 def strip_portable(callsign: str) -> str:
-    """DA6MAX/P → DA6MAX (portable suffixes share the base callsign's QRZ book)."""
+    """DM6AX/P → DM6AX (portable suffixes share the base callsign's QRZ book)."""
     cs = callsign.upper().strip()
     if cs.endswith(("/P", "/M", "/QRP", "/A", "/MM")):
         cs = cs.rsplit("/", 1)[0]
@@ -127,7 +127,7 @@ def strip_portable(callsign: str) -> str:
 
 
 def qrz_option_name(callsign: str) -> str:
-    """S5/DA6MAX → qrz_api_key_s5_da6max (the ~/.wavelog.conf option name)."""
+    """S5/DM6AX → qrz_api_key_s5_dm6ax (the ~/.wavelog.conf option name)."""
     return "qrz_api_key_" + strip_portable(callsign).lower().replace("/", "_")
 
 
@@ -179,7 +179,7 @@ def ensure_config(cfg: dict) -> dict:
         cfg["api_key"] = input("Wavelog API key: ").strip()
         changed = True
     if not cfg["callsign"]:
-        cfg["callsign"] = input("Station callsign (e.g. DA6MAX): ").strip().upper()
+        cfg["callsign"] = input("Station callsign (e.g. DM6AX): ").strip().upper()
         changed = True
     if not cfg["home_locator"]:
         hl = input("Your home QTH locator (e.g. JO40JG, Enter to skip): ").strip().upper()
@@ -617,8 +617,8 @@ def dxcc_from_park(park_data: dict) -> dict:
     """
     DXCC fields for the station location, taken from the park itself: the POTA
     API's entityId is the DXCC entity number (SI-0001 → 499 Slovenia). This is
-    where the station is operated, so it is right for any callsign — DA6MAX in
-    Slovenia as well as S5/DA6MAX. Returns {} if the park has no entity.
+    where the station is operated, so it is right for any callsign — DM6AX in
+    Slovenia as well as S5/DM6AX. Returns {} if the park has no entity.
     """
     try:
         entity = int(park_data.get("entityId"))
@@ -653,8 +653,8 @@ def build_station_payload(cfg, pota_refs, park_data, locator, geo,
 
     callsign = cfg.get("callsign", "").upper()
     qrz_key  = qrz_key_for(cfg, callsign)
-    # Fallback (no park data): decide by callsign. For DA6MAX/P the first part
-    # is the call itself; for prefix calls like S5/DA6MAX it is the operating
+    # Fallback (no park data): decide by callsign. For DM6AX/P the first part
+    # is the call itself; for prefix calls like S5/DM6AX it is the operating
     # prefix (S5) — so only German calls and German-prefixed calls count here.
     base_call   = callsign.split("/")[0]
     call_prefix = base_call[:2]

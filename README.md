@@ -259,7 +259,7 @@ This makes stations uniquely findable in dropdown lists and the Wavelog search e
 
 ### DXCC auto-fill
 
-The DXCC entity is taken from the **park**, not from your callsign: the POTA API's `entityId` is the DXCC entity number, so a station for `SI-0001` gets Slovenia (499) whether you operate as `DA6MAX` or `S5/DA6MAX`. CQ and ITU zones are filled in for Germany and a few neighbouring countries with a single zone each (AT, CH, CZ, HR, HU, IT, PL, SI, SK); for other entities they are left empty. Only if the POTA API returns no park data does the script fall back to the callsign (German calls → Germany, anything else → empty).
+The DXCC entity is taken from the **park**, not from your callsign: the POTA API's `entityId` is the DXCC entity number, so a station for `SI-0001` gets Slovenia (499) whether you operate as `DM6AX` or `S5/DM6AX`. CQ and ITU zones are filled in for Germany and a few neighbouring countries with a single zone each (AT, CH, CZ, HR, HU, IT, PL, SI, SK); for other entities they are left empty. Only if the POTA API returns no park data does the script fall back to the callsign (German calls → Germany, anything else → empty).
 
 ### Duplicate detection
 
@@ -313,8 +313,8 @@ Further reading: [Station Locations in Wavelog and POTA](https://db4scw.de) by D
 
 ## 🤖 Transparency
 
-Idea and concept: **DA6MAX**. Code generated with the assistance of [Claude](https://claude.ai) by Anthropic.
+Idea and concept: [**DM6AX**](https://www.qrz.com/db/DM6AX). Code generated with the assistance of [Claude](https://claude.ai) by Anthropic.
 
 ---
 
-73 de DA6MAX
+73 de DM6AX
