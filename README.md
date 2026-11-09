@@ -311,6 +311,13 @@ Further reading: [Station Locations in Wavelog and POTA](https://db4scw.de) by D
 
 ---
 
+## LogDeck
+
+In the Mac app [LogDeck](http://git.sammet.me:3000/hamradio/logdeck) this tool gets its own UI (`logdeck.toml`):
+the questions become dialogs, and progress, the detected activations and the result are shown in the app.
+`logdeck.py` is the helper for that – in a terminal it does nothing and every prompt stays exactly as before.
+It is a copy of `helper/logdeck.py` from the LogDeck repo.
+
 ## 🤖 Transparency
 
 Idea and concept: [**DM6AX**](https://www.qrz.com/db/DM6AX). Code generated with the assistance of [Claude](https://claude.ai) by Anthropic.
@@ -318,10 +325,3 @@ Idea and concept: [**DM6AX**](https://www.qrz.com/db/DM6AX). Code generated with
 ---
 
 73 de DM6AX
-
-## LogDeck
-
-In the Mac app [LogDeck](http://git.sammet.me:3000/hamradio/logdeck) this tool gets its own UI (`logdeck.toml`):
-the questions become dialogs, and progress, the detected activations and the result are shown in the app.
-`logdeck.py` is the helper for that – in a terminal it does nothing and every prompt stays exactly as before.
-It is a copy of `helper/logdeck.py` from the LogDeck repo.
