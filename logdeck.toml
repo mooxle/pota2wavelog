@@ -10,6 +10,8 @@ icon = "park"
 group = "Wavelog"
 
 [run]
+# nutzt den Helfer logdeck.py: Dialoge und Ergebnis-Ansicht statt Terminal
+events = true
 command = ["python", "pota2wavelog.py"]
 cwd = "{home}"
 

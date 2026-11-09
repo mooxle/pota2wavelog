@@ -38,6 +38,27 @@ import urllib.request
 import urllib.parse
 import urllib.error
 
+import logdeck as ld  # LogDeck integration (dialogs, progress); no effect in a terminal
+
+
+def _confirm(cli_prompt: str, text: str, default: bool = True) -> bool:
+    """Yes/no: a dialog in LogDeck, the unchanged input() prompt in a terminal.
+    default=True: anything but "n" means yes; default=False: only "y" means yes."""
+    if ld.active():
+        return ld.confirm(text, default=default)
+    a = input(cli_prompt).strip().lower()
+    return a != "n" if default else a == "y"
+
+
+def _text(cli_prompt: str, text: str, default: str = "") -> str:
+    """Free text: a dialog in LogDeck (pre-filled with default), input() in a terminal.
+    Returns what was entered; in a terminal an empty answer stays empty (callers keep their default)."""
+    if ld.active():
+        v = ld.ask(text, default=default or None).strip()
+        return "" if v == default else v
+    return input(cli_prompt).strip()
+
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -173,25 +194,25 @@ def save_config(cfg: dict):
 def ensure_config(cfg: dict) -> dict:
     changed = False
     if not cfg["url"]:
-        cfg["url"] = input("Wavelog URL (e.g. https://log.example.com): ").strip().rstrip("/")
+        cfg["url"] = _text("Wavelog URL (e.g. https://log.example.com): ", "Wavelog URL (e.g. https://log.example.com)").rstrip("/")
         changed = True
     if not cfg["api_key"]:
-        cfg["api_key"] = input("Wavelog API key: ").strip()
+        cfg["api_key"] = _text("Wavelog API key: ", "Wavelog API key")
         changed = True
     if not cfg["callsign"]:
-        cfg["callsign"] = input("Station callsign (e.g. DM6AX): ").strip().upper()
+        cfg["callsign"] = _text("Station callsign (e.g. DM6AX): ", "Station callsign (e.g. DM6AX)").upper()
         changed = True
     if not cfg["home_locator"]:
-        hl = input("Your home QTH locator (e.g. JO40JG, Enter to skip): ").strip().upper()
+        hl = _text("Your home QTH locator (e.g. JO40JG, Enter to skip): ", "Your home QTH locator (e.g. JO40JG) – leave empty to skip").upper()
         if hl:
             cfg["home_locator"] = hl
             changed = True
     if not qrz_key_for(cfg, cfg["callsign"]):
-        qrz = input(f"QRZ.com logbook API key for {cfg['callsign']} (Enter to skip): ").strip()
+        qrz = _text(f"QRZ.com logbook API key for {cfg['callsign']} (Enter to skip): ", f"QRZ.com logbook API key for {cfg['callsign']} – leave empty to skip")
         if qrz:
             cfg["qrz_keys"][strip_portable(cfg["callsign"])] = qrz
             changed = True
-    if changed and input("Save to ~/.wavelog.conf? [y/N] ").strip().lower() == "y":
+    if changed and _confirm("Save to ~/.wavelog.conf? [y/N] ", "Save these settings to ~/.wavelog.conf?", default=False):
         save_config(cfg)
     return cfg
 
@@ -421,9 +442,11 @@ def extract_activations_from_adif(filepath: str,
             print()
             print(f"  ⚠️  Home QTH locator detected: {home}")
             print(f"     {home_count} QSOs were logged with the home locator.")
-            answer = input("     Was this an activation from your home QTH "
-                           "(park right at your doorstep)? [Y/n] ").strip().lower()
-            if answer != "n":
+            if _confirm("     Was this an activation from your home QTH "
+                        "(park right at your doorstep)? [Y/n] ",
+                        f"Home QTH locator {home} found ({home_count} QSOs). Was this an activation "
+                        f"from your home QTH (park right at your doorstep)?\n\nNo = GPS failure, "
+                        f"the locator will be corrected manually.", default=True):
                 # Deliberate home activation → not a GPS failure
                 groups[home]["is_home_fallback"] = False
                 groups[home]["home_activation"]  = True
@@ -488,8 +511,10 @@ def extract_activations_from_adif(filepath: str,
 
             if same_refs:
                 print(f"  │  → Same refs: likely GPS drift")
-                answer = input(f"  │    Merge into one station? [y/n] ").strip().lower()
-                if answer != "n":
+                if _confirm(f"  │    Merge into one station? [y/n] ",
+                            f"{loc_a} ({count_a} QSOs) and {loc_b} ({count_b} QSOs) are {dist:.1f} km apart "
+                            f"with the same refs ({', '.join(refs_a)}) – likely GPS drift.\n\n"
+                            f"Merge into one station?", default=True):
                     union(loc_a, loc_b, winner)
                     print(f"  │    ✓ Merged → locator: {winner} ({max(count_a,count_b)} QSOs)")
                 else:
@@ -499,7 +524,13 @@ def extract_activations_from_adif(filepath: str,
                 print(f"  │    [1] N-fer: one station with all refs")
                 print(f"  │    [2] Separate stations")
                 while True:
-                    choice = input(f"  │  Choice [1/2]: ").strip()
+                    if ld.active():
+                        choice = ld.choose(
+                            f"{loc_a} ({', '.join(refs_a)}) and {loc_b} ({', '.join(refs_b)}) are "
+                            f"{dist:.1f} km apart with different refs – possible N-fer.",
+                            [("1", "N-fer: one station with all refs"), ("2", "Separate stations")], default="1")
+                    else:
+                        choice = input(f"  │  Choice [1/2]: ").strip()
                     if choice == "1":
                         union(loc_a, loc_b, winner)
                         all_refs = sorted(groups[loc_a]["refs"] | groups[loc_b]["refs"])
@@ -740,20 +771,36 @@ def confirm_station(payload: dict):
     print("━" * 62)
     print()
     while True:
-        a = input("  [y] Create  [n] Cancel  [e] Name  [l] Locator  [c] City\n"
-                  "  Choice: ").strip().lower()
+        if ld.active():
+            ld.table(["Field", "Value"], [
+                ["Name", payload["station_profile_name"]], ["Call", payload["station_callsign"]],
+                ["Locator", payload["station_gridsquare"]], ["City", payload["station_city"]],
+                ["State", payload["state"]], ["POTA", payload["station_pota"]],
+                ["DXCC", f"{payload['dxccname']} ({payload['station_dxcc']})"],
+                ["CQ / ITU", f"{payload['station_cq']} / {payload['station_itu']}"],
+                ["QRZ.com", "upload enabled (key found)" if payload.get("qrzapikey")
+                 else f"no key for {payload['station_callsign']} – upload disabled"],
+            ], id="planned", title="Planned station location")
+            a = ld.choose("Create this station location in Wavelog?", [
+                ("y", "Create station"), ("e", "Change name"), ("l", "Change locator"),
+                ("c", "Change city"), ("n", "Cancel")], default="y")
+        else:
+            a = input("  [y] Create  [n] Cancel  [e] Name  [l] Locator  [c] City\n"
+                      "  Choice: ").strip().lower()
         if a == "y":
             return payload
         elif a == "n":
             print("  Cancelled."); return None
         elif a == "e":
-            val = input(f"  New name [{payload['station_profile_name']}]: ").strip()
+            val = _text(f"  New name [{payload['station_profile_name']}]: ", "Station name",
+                        payload["station_profile_name"])
             if val: payload["station_profile_name"] = val
         elif a == "l":
-            val = input(f"  New locator [{payload['station_gridsquare']}]: ").strip().upper()
+            val = _text(f"  New locator [{payload['station_gridsquare']}]: ", "Locator",
+                        payload["station_gridsquare"]).upper()
             if val: payload["station_gridsquare"] = val
         elif a == "c":
-            val = input(f"  New city [{payload['station_city']}]: ").strip()
+            val = _text(f"  New city [{payload['station_city']}]: ", "City", payload["station_city"])
             if val: payload["station_city"] = val
         else:
             print("  Please enter y, n, e, l or c.")
@@ -799,6 +846,15 @@ def _ask_home_station_choice(existing_stations: list, locator: str,
                   f"{s.get('station_profile_name')}")
     print(f"  └───────────────────────────────────────────────────────────")
 
+    if ld.active():
+        labels = {"1": f"Create a new POTA station ({refs_str} @ {locator})"}
+        for kind, stations in (("home station", home_stns), ("existing POTA station", pota_stns)):
+            for s in stations:
+                key = next(k for k, v in options.items() if v == str(s.get("station_id")))
+                labels[key] = f"Import into {kind}: [{s.get('station_id')}] {s.get('station_profile_name')}"
+        choice = ld.choose(f"Home activation: locator {locator} is your home QTH ({refs_str}). "
+                           f"Which station gets the QSOs?", [(k, labels[k]) for k in options], default="1")
+        return options[choice]
     while True:
         choice = input(f"  Choice [{'/'.join(options)}]: ").strip()
         if choice in options:
@@ -809,6 +865,7 @@ def _ask_home_station_choice(existing_stations: list, locator: str,
 def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
                   adif_meta=None, existing_stations=None,
                   home_activation=False) -> bool:
+    refs_label = " + ".join(pota_refs)
     print()
     print(f"▶  POTA: {' + '.join(pota_refs)}")
 
@@ -829,6 +886,9 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
             print(f"       ✓ {data.get('name','?')} ({data.get('locationName','')})")
         else:
             print(f"       ✗ No data for {ref}")
+    ld.step(f"{refs_label} · park data", "ok" if park_data else "warn", id=f"{refs_label}:park",
+            detail=(f"{park_data.get('name', '?')} ({park_data.get('locationName', '')})" if park_data
+                    else "no data from the POTA API"))
 
     # 2. Locator
     print(f"\n  [2/4] Locator...")
@@ -838,25 +898,35 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
     elif adif_locator and len(adif_locator) >= 6:
         locator = adif_locator.upper()
         print(f"       ✓ From ADIF: {locator}")
-        override = input(f"       Accept [{locator}] or enter new (Enter to accept): ").strip().upper()
+        override = _text(f"       Accept [{locator}] or enter new (Enter to accept): ",
+                         f"{refs_label}: locator from the ADIF file – accept or correct", locator).upper()
         if override: locator = override
     elif adif_locator and len(adif_locator) == 4:
         print(f"       ⚠  ADIF locator is only 4 characters: {adif_locator.upper()}")
         if pota_lat is not None:
             calc = latlon_to_maidenhead(pota_lat, pota_lon)
             print(f"       ℹ  Calculated from POTA GPS: {calc}")
-            val = input(f"       Use [{calc}]: ").strip().upper()
+            val = _text(f"       Use [{calc}]: ",
+                        f"{refs_label}: the ADIF locator {adif_locator.upper()} has only 4 characters. "
+                        f"Calculated from the POTA park position:", calc).upper()
             locator = val if val else calc
         else:
-            val = input(f"       Enter manually [{adif_locator.upper()}]: ").strip().upper()
+            val = _text(f"       Enter manually [{adif_locator.upper()}]: ",
+                        f"{refs_label}: the ADIF locator has only 4 characters – enter the full locator",
+                        adif_locator.upper()).upper()
             locator = val if val else adif_locator.upper()
     elif pota_lat is not None:
         locator = latlon_to_maidenhead(pota_lat, pota_lon)
         print(f"       ✓ From POTA GPS: {locator}")
-        override = input(f"       Accept [{locator}] or enter new (Enter to accept): ").strip().upper()
+        override = _text(f"       Accept [{locator}] or enter new (Enter to accept): ",
+                         f"{refs_label}: locator from the POTA park position – accept or correct", locator).upper()
         if override: locator = override
     else:
-        locator = input("       GPS not available. Enter locator manually: ").strip().upper()
+        locator = _text("       GPS not available. Enter locator manually: ",
+                        f"{refs_label}: no position available – enter the locator").upper()
+
+    ld.step(f"{refs_label} · locator", "ok" if locator else "warn", id=f"{refs_label}:locator",
+            detail=locator or "none")
 
     # 3. Reverse geocoding (locator → GPS → Nominatim)
     print(f"\n  [3/4] Location...")
@@ -864,11 +934,15 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
     if gc_lat is not None:
         geo = reverse_geocode(gc_lat, gc_lon)
         print(f"       ✓ {geo['city']}, {geo['state_name']} ({geo['state_code']})")
-        override = input(f"       Accept [{geo['city']}] or enter new (Enter to accept): ").strip()
+        override = _text(f"       Accept [{geo['city']}] or enter new (Enter to accept): ",
+                         f"{refs_label}: city for locator {locator} – accept or correct", geo["city"])
         if override: geo["city"] = override
     else:
         geo = {"city": "", "state_code": "", "state_name": "", "country": ""}
-        geo["city"] = input("       Enter city manually: ").strip()
+        geo["city"] = _text("       Enter city manually: ", f"{refs_label}: enter the city")
+
+    ld.step(f"{refs_label} · location", "ok", id=f"{refs_label}:geo",
+            detail=", ".join(x for x in (geo.get("city"), geo.get("state_name")) if x) or "–")
 
     # 4. Station selection (home activation) or duplicate check
     if existing_stations is None:
@@ -879,6 +953,8 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
         choice = _ask_home_station_choice(existing_stations, locator, pota_refs)
         if choice != "new":
             print(f"  → Using station ID: {choice}")
+            ld.step(f"{refs_label} · station", "ok", id=f"{refs_label}:station",
+                    detail=f"existing station ID {choice}")
             return choice
         # "new": the user chose explicitly → no duplicate check, create below
         dupes = []
@@ -890,17 +966,24 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
         print(f"  ⚠️  Station already exists:")
         for d in dupes:
             print(f"     • [{d.get('station_id')}] {d.get('station_profile_name')}")
-        answer = input("  Import QSOs into this station anyway? [y/n] ").strip().lower()
-        if answer == "n":
-            create_new = input("  Create a new station instead? [y/n] ").strip().lower()
-            if create_new != "y":
-                print("  Skipped."); return None
+        names = ", ".join(f"[{d.get('station_id')}] {d.get('station_profile_name')}" for d in dupes)
+        if not _confirm("  Import QSOs into this station anyway? [y/n] ",
+                        f"{refs_label}: station already exists: {names}.\n\n"
+                        f"Use this station (import the QSOs into it)?", default=True):
+            if not _confirm("  Create a new station instead? [y/n] ",
+                            f"{refs_label}: create a new station instead? No = skip this activation.",
+                            default=False):
+                print("  Skipped.")
+                ld.step(f"{refs_label} · station", "skip", id=f"{refs_label}:station", detail="skipped")
+                return None
             print("  → Proceeding to create a new station.")
             # Fall through to payload building below
         else:
             # Use the ID of the first match (user confirmed)
             existing_station_id = dupes[0].get("station_id")
             print(f"  → Using station ID: {existing_station_id}")
+            ld.step(f"{refs_label} · station", "ok", id=f"{refs_label}:station",
+                    detail=f"existing station ID {existing_station_id}")
     elif not home_activation:
         print("       ✓ No duplicates")
 
@@ -909,12 +992,15 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
         return existing_station_id
 
     # Build payload and confirm
-    link    = input("\n  Link station to active logbook? [y/n] ").strip().lower()
+    link    = _confirm("\n  Link station to active logbook? [y/n] ",
+                       f"{refs_label}: link the new station to the active logbook?", default=True)
     payload = build_station_payload(cfg, pota_refs, park_data, locator, geo,
-                                    link_logbook=(link != "n"), adif_meta=adif_meta)
+                                    link_logbook=link, adif_meta=adif_meta)
     confirmed = confirm_station(payload)
     if confirmed is None:
+        ld.step(f"{refs_label} · station", "skip", id=f"{refs_label}:station", detail="cancelled")
         return None
+    ld.step(f"{refs_label} · station", "run", id=f"{refs_label}:station", detail="creating …")
 
     print("\n  Creating station...")
     status, response = create_station(cfg, confirmed)
@@ -930,8 +1016,11 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
                       if s.get("station_profile_name") == confirmed["station_profile_name"]), None)
         if match:
             print(f"  ✅ Station exists after all → ID {match.get('station_id')}")
+            ld.step(f"{refs_label} · station", "ok", id=f"{refs_label}:station",
+                    detail=f"created (ID {match.get('station_id')})")
             return match.get("station_id")
         print(f"  ✗ Not created. Nothing was left behind, so a rerun is safe.")
+        ld.step(f"{refs_label} · station", "err", id=f"{refs_label}:station", detail=f"not created ({why})")
         print(f"     If it fails the same way again, the problem is on the Wavelog server")
         print(f"     (check its PHP / web server log for this request).")
         return None
@@ -941,6 +1030,8 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
         if confirmed.get("qrzapikey"):
             print(f"  ℹ️  QRZ key set and upload enabled (non-realtime).")
         else:
+            ld.note(f"No QRZ key for {confirmed['station_callsign']} – QRZ upload is disabled for this station.",
+                    "warn")
             print(f"  ℹ️  No QRZ key for {confirmed['station_callsign']} — upload is disabled. "
                   f"Add {qrz_option_name(confirmed['station_callsign'])} to ~/.wavelog.conf "
                   f"and set key + upload in Wavelog (Edit station → QRZ.com).")
@@ -951,14 +1042,18 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
             if any(ref in name for ref in pota_refs):
                 sid = s.get("station_id")
                 print(f"  → Station ID: {sid}")
+                ld.step(f"{refs_label} · station", "ok", id=f"{refs_label}:station",
+                        detail=f"created: {confirmed['station_profile_name']} (ID {sid})")
                 return sid
         print(f"  ⚠️  Could not determine station ID.")
         return None
     elif status == 200 and response.get("status") == "dupe":
         print(f"  ⚠️  Wavelog: already exists (internal check).")
+        ld.step(f"{refs_label} · station", "warn", id=f"{refs_label}:station", detail="already exists in Wavelog")
         return None
     else:
         print(f"  ✗ Error (HTTP {status}): {response}")
+        ld.step(f"{refs_label} · station", "err", id=f"{refs_label}:station", detail=f"error HTTP {status}")
         return None
 
 
@@ -1038,8 +1133,10 @@ def import_qsos_from_adif(cfg: dict, station_id: str, adif_path: str,
 
     url = f"{cfg['url']}/index.php/api/qso"
     imported = dupes = errors = 0
+    label = " + ".join(pota_refs) if pota_refs else f"station {station_id}"
 
     for i, record in enumerate(records, 1):
+        ld.progress(i - 1, len(records), f"QSO import {label}: {imported} imported, {dupes} duplicates")
         payload = {
             "key":                cfg["api_key"],
             "station_profile_id": str(station_id),
@@ -1072,6 +1169,9 @@ def import_qsos_from_adif(cfg: dict, station_id: str, adif_path: str,
                   f"  ⟳ {dupes} duplicates  ✗ {errors} errors", end="\r")
 
     print()  # newline after progress display
+    ld.progress(len(records), len(records), f"QSO import {label} done")
+    ld.step(f"{label} · QSO import", "err" if errors else "ok", id=f"{label}:import",
+            detail=f"{imported} imported, {dupes} duplicates, {errors} errors")
     return {"imported": imported, "dupes": dupes, "errors": errors}
 
 
@@ -1109,7 +1209,24 @@ def adif_mode(cfg, adif_path, manual_locator="",
     activations = extract_activations_from_adif(adif_path, merge_distance_km,
                                                 home_locator=home)
     if not activations:
+        ld.done(f"No POTA activations found in {Path(adif_path).name}.", "err")
         return
+    ld.step(f"Read {Path(adif_path).name}", "ok", id="adif", detail=f"{len(activations)} activation(s)")
+    ld.table([
+        {"key": "n", "label": "#", "mono": True},
+        {"key": "refs", "label": "POTA", "mono": True},
+        {"key": "loc", "label": "Locator", "mono": True},
+        {"key": "qsos", "label": "QSOs", "align": "right"},
+        {"key": "date", "label": "Date", "mono": True},
+        {"key": "note", "label": ""},
+    ], [{
+        "n": i, "refs": " + ".join(a["refs"]), "loc": a["locator"], "qsos": a["qso_count"],
+        "date": a["date"],
+        "note": ", ".join(x for x in (
+            f"{len(a['refs'])}-fer" if len(a["refs"]) > 1 else "",
+            "home activation" if a.get("home_activation") else "",
+            f"merged from {', '.join(a['merged_from'])}" if a.get("merged_from") else "") if x),
+    } for i, a in enumerate(activations, 1)], id="activations", title="Detected activations")
 
     print(f"\n  Detected activations: {len(activations)}")
     for i, act in enumerate(activations, 1):
@@ -1136,7 +1253,13 @@ def adif_mode(cfg, adif_path, manual_locator="",
         # Callsign from ADIF vs. config
         if act.get("callsign") and act["callsign"] != cfg["callsign"]:
             print(f"  ℹ  Callsign in ADIF: {act['callsign']} | Config: {cfg['callsign']}")
-            choice = input(f"  Which one to use? [{cfg['callsign']}]: ").strip().upper()
+            if ld.active():
+                choice = ld.choose(f"{refs_str}: the ADIF file was logged as {act['callsign']}, "
+                                   f"the configuration says {cfg['callsign']}. Which callsign?",
+                                   [act["callsign"], cfg["callsign"]], default=cfg["callsign"])
+                choice = "" if choice == cfg["callsign"] else choice
+            else:
+                choice = input(f"  Which one to use? [{cfg['callsign']}]: ").strip().upper()
             if choice:
                 cfg = dict(cfg); cfg["callsign"] = choice
 
@@ -1168,7 +1291,8 @@ def adif_mode(cfg, adif_path, manual_locator="",
             skip += 1
 
         if i < len(activations):
-            if input(f"\n  Continue to next activation? [y/n] ").strip().lower() == "n":
+            if not _confirm(f"\n  Continue to next activation? [y/n] ",
+                            f"Continue with activation {i + 1}/{len(activations)}?", default=True):
                 print("  Aborted."); break
 
     print()
@@ -1176,6 +1300,12 @@ def adif_mode(cfg, adif_path, manual_locator="",
     print(f"  Stations: {ok} processed, {skip} skipped")
     print(f"  QSOs:     {qsos_imported} imported, {qsos_dupes} duplicates")
     print("=" * 62)
+    ld.stat("Stations", ok, "ok" if ok else None)
+    ld.stat("Skipped", skip, "warn" if skip else None)
+    ld.stat("QSOs imported", qsos_imported, "ok" if qsos_imported else None)
+    ld.stat("Duplicates", qsos_dupes)
+    ld.done(f"{ok} station(s) processed, {skip} skipped – {qsos_imported} QSOs imported, "
+            f"{qsos_dupes} duplicates.", "ok" if ok and not skip else "warn")
 
 # ---------------------------------------------------------------------------
 # Interactive mode
@@ -1188,17 +1318,18 @@ def interactive_mode(cfg):
     print("=" * 62)
     while True:
         print()
-        entry = input(
+        entry = _text(
             "POTA ref(s) (e.g. 'DE-0034' or 'DE-0034 DE-1197' for N-fer)\n"
-            "or 'q' to quit: "
-        ).strip()
+            "or 'q' to quit: ",
+            "POTA reference(s), e.g. DE-0034 or DE-0034 DE-1197 for an N-fer – 'q' to quit"
+        ) or ("q" if ld.active() else "")
         if entry.lower() in ("q", "quit", "exit"):
             print(f"73 de {cfg['callsign']}"); break
         refs = [r.strip().upper().replace("POTA ","")
                 for r in entry.replace(",", " ").split() if r.strip()]
         if not refs: continue
         process_parks(cfg, refs)
-        if input("\nCreate another station? [y/n] ").strip().lower() == "n":
+        if not _confirm("\nCreate another station? [y/n] ", "Create another station?", default=True):
             print(f"73 de {cfg['callsign']}"); break
 
 # ---------------------------------------------------------------------------
@@ -1243,7 +1374,9 @@ def main():
                   merge_distance_km=args.merge_distance)
     elif args.refs:
         refs = [r.strip().upper().replace("POTA ","") for r in args.refs if r.strip()]
-        process_parks(cfg, refs, manual_locator=args.locator.upper())
+        sid = process_parks(cfg, refs, manual_locator=args.locator.upper())
+        ld.done(f"{' + '.join(refs)}: station ID {sid}." if sid is not None
+                else f"{' + '.join(refs)}: no station created.", "ok" if sid is not None else "warn")
     else:
         interactive_mode(cfg)
 
