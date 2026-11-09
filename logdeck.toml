@@ -1,5 +1,5 @@
-# Beschreibung für LogDeck (https://git.sammet.me/hamradio/logdeck).
-# LogDeck baut daraus das Formular; das Script selbst bleibt unverändert nutzbar.
+# Description for LogDeck, a Mac app front end for these scripts (optional – the script runs without it).
+# LogDeck builds its form from this file; the script itself stays unchanged and usable on its own.
 schema = 1
 
 [tool]
