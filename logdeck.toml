@@ -1,0 +1,56 @@
+# Beschreibung für LogDeck (https://git.sammet.me/hamradio/logdeck).
+# LogDeck baut daraus das Formular; das Script selbst bleibt unverändert nutzbar.
+schema = 1
+
+[tool]
+name = "POTA → Wavelog"
+summary = "Legt für POTA-Aktivierungen Stationen in Wavelog an – aus Park-Referenzen oder direkt aus der ADIF-Datei der Aktivierung."
+summary_en = "Creates Wavelog station locations for POTA activations, from park references or straight from the activation's ADIF file."
+icon = "park"
+group = "Wavelog"
+
+[run]
+command = ["python", "pota2wavelog.py"]
+cwd = "{home}"
+
+[[param]]
+id = "adif"
+label = "ADIF-Datei"
+label_en = "ADIF file"
+type = "file"
+flag = "--adif"
+accept = ["adi", "adif"]
+help = "Aktivierung aus dem Log importieren. Leer lassen, um Parks direkt anzugeben."
+help_en = "Import an activation from your log. Leave empty to enter parks directly."
+
+[[param]]
+id = "refs"
+label = "POTA-Referenzen"
+label_en = "POTA references"
+type = "list"
+placeholder = "DE-0034 DE-1197"
+help = "Eine oder mehrere (N-fer). Ohne ADIF-Datei und ohne Referenz fragt das Script nach."
+help_en = "One or more (n-fer). With neither ADIF file nor reference the script asks."
+
+[[param]]
+id = "locator"
+label = "Locator"
+type = "text"
+flag = "--locator"
+placeholder = "JO40HJ"
+help = "Überschreibt Locator aus ADIF und GPS."
+help_en = "Overrides the locator from ADIF and GPS."
+
+[[param]]
+id = "merge_distance"
+label = "Zusammenlegen bis"
+label_en = "Merge within"
+type = "number"
+flag = "--merge-distance"
+unit = "km"
+placeholder = "5"
+min = 0
+step = 0.5
+advanced = true
+help = "Stationen mit GPS-Abweichung bis zu dieser Entfernung gelten als dieselbe."
+help_en = "Stations whose GPS positions differ by less than this count as one."
