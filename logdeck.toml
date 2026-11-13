@@ -56,3 +56,24 @@ step = 0.5
 advanced = true
 help = "Stationen mit GPS-Abweichung bis zu dieser Entfernung gelten als dieselbe."
 help_en = "Stations whose GPS positions differ by less than this count as one."
+
+[[param]]
+id = "rig"
+label = "Rig"
+type = "text"
+flag = "--rig"
+advanced = true
+placeholder = "ft891"
+help = "Name oder Kürzel aus [rigs] in ~/.wavelog.conf. Leer: bei mehreren Einträgen fragt das Script (Vorauswahl aus [setup])."
+help_en = "Name or id from [rigs] in ~/.wavelog.conf. Empty: the script asks when there are several (preselected from [setup])."
+
+[[param]]
+id = "antenna"
+label = "Antenne"
+label_en = "Antenna"
+type = "text"
+flag = "--antenna"
+advanced = true
+placeholder = "vdipole"
+help = "Name oder Kürzel aus [antennas] in ~/.wavelog.conf. Leer: bei mehreren Einträgen fragt das Script."
+help_en = "Name or id from [antennas] in ~/.wavelog.conf. Empty: the script asks when there are several."

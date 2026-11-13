@@ -117,11 +117,20 @@ def load_config() -> dict:
         "home_locator": os.environ.get("WAVELOG_HOME_LOCATOR", ""),
         "qrz_api_key":  os.environ.get("WAVELOG_QRZ_API_KEY",  ""),
         "qrz_keys":     {},   # per-callsign QRZ keys: {"S5/DM6AX": "..."}
+        "rigs":         {},   # [rigs]     id = name, in file order
+        "antennas":     {},   # [antennas] id = name, in file order
+        "default_rig":  "",   # [setup] rig / antenna: preselected at import
+        "default_antenna": "",
     }
     conf_path = Path.home() / ".wavelog.conf"
     if conf_path.exists():
-        p = configparser.ConfigParser()
+        p = configparser.ConfigParser(interpolation=None)
         p.read(conf_path)
+        for sect, key in (("rigs", "rigs"), ("antennas", "antennas")):
+            if p.has_section(sect):
+                cfg[key] = {k: v.strip() for k, v in p.items(sect) if v.strip()}
+        cfg["default_rig"]     = p.get("setup", "rig",     fallback="").strip().lower()
+        cfg["default_antenna"] = p.get("setup", "antenna", fallback="").strip().lower()
         s = "wavelog"
         if p.has_section(s):
             cfg["url"]          = cfg["url"]          or p.get(s, "url",          fallback="")
@@ -170,7 +179,7 @@ def qrz_key_for(cfg: dict, callsign: str) -> str:
 
 def save_config(cfg: dict):
     conf_path = Path.home() / ".wavelog.conf"
-    p = configparser.ConfigParser()
+    p = configparser.ConfigParser(interpolation=None)
     if conf_path.exists():
         p.read(conf_path)
     if not p.has_section("wavelog"):
@@ -1058,6 +1067,103 @@ def process_parks(cfg, pota_refs, manual_locator="", adif_locator="",
 
 
 # ---------------------------------------------------------------------------
+# Rig / antenna setup (written into the QSO comment)
+# ---------------------------------------------------------------------------
+#
+# ~/.wavelog.conf:
+#   [rigs]
+#   ft891 = Yaesu FT-891
+#   [antennas]
+#   vdipole = Vertical Dipole - 4m high
+#   [setup]            ; optional defaults
+#   rig = ft891
+#   antenna = vdipole
+#
+# The chosen names end up in each QSO's COMMENT as "[antenna] … [rig] …" —
+# the tags wavelog-qsl-convert reads for the QSL card.
+
+NONE_CHOICE = "-"   # option value for "leave this one out"
+
+
+def resolve_setup_item(items: dict, wanted: str) -> str | None:
+    """Config id or (case-insensitive) name → the display name; None if unknown."""
+    w = wanted.strip().lower()
+    for key, name in items.items():
+        if w in (key.lower(), name.lower()):
+            return name
+    return None
+
+
+def pick_setup_item(kind: str, items: dict, wanted: str = "", default: str = "") -> str:
+    """
+    Name of the rig/antenna to use, or "" for none.
+      wanted:  --rig/--antenna value (id or name) — no question asked
+      default: preselected config id (or name) in the question
+    One configured entry is used without asking; several are asked for, in a
+    LogDeck dialog or on the terminal (ld.choose falls back to input()).
+    """
+    if wanted:   # unknown names are taken literally (main() rejects them when a list exists)
+        return resolve_setup_item(items, wanted) or wanted.strip()
+    if not items:
+        return ""
+    if len(items) == 1:
+        return next(iter(items.values()))
+    options = [(name, name) for name in items.values()] + [(NONE_CHOICE, f"(no {kind})")]
+    preset  = resolve_setup_item(items, default) if default else None
+    choice  = ld.choose(f"Which {kind} did you use?", options, default=preset or None)
+    return "" if choice == NONE_CHOICE else choice
+
+
+def choose_setup(cfg: dict, rig: str = "", antenna: str = "",
+                 previous: tuple | None = None) -> tuple:
+    """(rig name, antenna name) for one activation. `previous` = last choice of this run."""
+    rig_default = previous[0] if previous else cfg.get("default_rig", "")
+    ant_default = previous[1] if previous else cfg.get("default_antenna", "")
+    return (pick_setup_item("rig",     cfg.get("rigs", {}),     rig,     rig_default),
+            pick_setup_item("antenna", cfg.get("antennas", {}), antenna, ant_default))
+
+
+def _tag_text(text: str) -> str:
+    """Tag values must not contain brackets (they delimit the tags)."""
+    return re.sub(r"\s+", " ", text.replace("[", "(").replace("]", ")")).strip()
+
+
+def comment_with_setup(comment: str, rig: str, antenna: str) -> str:
+    """
+    Existing comment text (before the first tag) + "[antenna] … [rig] …".
+    Old [antenna]/[rig] tags are replaced, so re-importing never duplicates them.
+    """
+    remark = re.split(r"\[(?:antenna|rig)\]", comment, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+    parts  = [remark] if remark else []
+    if antenna: parts.append(f"[antenna] {_tag_text(antenna)}")
+    if rig:     parts.append(f"[rig] {_tag_text(rig)}")
+    return " ".join(parts)
+
+
+def set_adif_comment(record: str, rig: str, antenna: str) -> str:
+    """Write the rig/antenna tags into the COMMENT field of one raw ADIF record."""
+    if not (rig or antenna):
+        return record
+    m = re.search(r"<COMMENT:(\d+)(?::[^>]*)?>", record, re.IGNORECASE)
+    if m:
+        n = int(m.group(1))
+        old, end = record[m.end():m.end() + n], m.end() + n
+        # Some loggers count bytes instead of characters; if the field does not
+        # end where the char count says, take the byte count.
+        if record[end:end + 1].strip() not in ("", "<") and not old.isascii():
+            old = record[m.end():].encode("utf-8")[:n].decode("utf-8", errors="ignore")
+            end = m.end() + len(old)
+        head, tail, sep = record[:m.start()], record[end:], ""
+    else:
+        old, sep = "", " "
+        e = re.search(r"\s*<eor>\s*$", record, re.IGNORECASE)   # insert before <eor>
+        head, tail = (record[:e.start()], record[e.start():]) if e else (record, "")
+    new = comment_with_setup(old, rig, antenna)
+    # Wavelog (PHP) cuts the field by bytes, so the length is the UTF-8 byte count
+    return f"{head}{sep}<COMMENT:{len(new.encode('utf-8'))}>{new}{tail}"
+
+
+# ---------------------------------------------------------------------------
 # QSO import
 # ---------------------------------------------------------------------------
 
@@ -1081,7 +1187,8 @@ def read_raw_qso_strings(filepath: str) -> list:
 
 def import_qsos_from_adif(cfg: dict, station_id: str, adif_path: str,
                            pota_refs: list = None,
-                           station_locator: str = "") -> dict:
+                           station_locator: str = "",
+                           setup: tuple = ("", "")) -> dict:
     """
     Imports QSOs from an ADIF file into a Wavelog station.
 
@@ -1092,6 +1199,9 @@ def import_qsos_from_adif(cfg: dict, station_id: str, adif_path: str,
                       this value before sending. This ensures GPS-drift and
                       home-fallback QSOs (which carry a different locator) are
                       accepted by Wavelog instead of being silently skipped.
+
+    setup:            (rig, antenna) names; written into each QSO's COMMENT as
+                      "[antenna] … [rig] …" (read by wavelog-qsl-convert).
 
     Returns {"imported": N, "dupes": N, "errors": N}.
     """
@@ -1128,6 +1238,10 @@ def import_qsos_from_adif(cfg: dict, station_id: str, adif_path: str,
                 )
             normalised.append(record)
         records = normalised
+
+    if any(setup):
+        records = [set_adif_comment(r, *setup) for r in records]
+        print(f"       Comment: {comment_with_setup('', *setup)}")
 
     print(f"\n  → QSO import: {len(records)} QSOs → station ID {station_id}")
 
@@ -1196,7 +1310,8 @@ def _dxcc_from_locator(locator: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def adif_mode(cfg, adif_path, manual_locator="",
-              merge_distance_km=DEFAULT_MERGE_DISTANCE_KM):
+              merge_distance_km=DEFAULT_MERGE_DISTANCE_KM,
+              rig="", antenna=""):
     home = cfg.get("home_locator", "").upper()
     print()
     print("=" * 62)
@@ -1244,6 +1359,7 @@ def adif_mode(cfg, adif_path, manual_locator="",
     print(f"  → {len(existing)} existing stations in Wavelog.")
 
     ok = skip = qsos_imported = qsos_dupes = 0
+    setup = None   # last (rig, antenna) of this run — preselected for the next activation
     for i, act in enumerate(activations, 1):
         refs_str = " + ".join(act["refs"])
         print(f"\n{'─' * 62}")
@@ -1278,10 +1394,12 @@ def adif_mode(cfg, adif_path, manual_locator="",
         )
         if station_id is not None:
             ok += 1
+            setup = choose_setup(cfg, rig, antenna, previous=setup)
             print(f"\n  [5/5] QSO import...")
             result = import_qsos_from_adif(cfg, station_id, adif_path,
                                             pota_refs=act["refs"],
-                                            station_locator=act["locator"])
+                                            station_locator=act["locator"],
+                                            setup=setup)
             print(f"  ✅ {result['imported']} QSOs imported"
                   f"  |  {result['dupes']} duplicates"
                   f"  |  {result['errors']} errors")
@@ -1359,11 +1477,22 @@ def main():
                    default=DEFAULT_MERGE_DISTANCE_KM,
                    help=f"Maximum distance in km for GPS drift detection "
                         f"(default: {DEFAULT_MERGE_DISTANCE_KM})")
+    p.add_argument("--rig", metavar="ID|NAME", default="",
+                   help="Rig from [rigs] in ~/.wavelog.conf for the QSO comment "
+                        "(default: ask, preselecting [setup] rig)")
+    p.add_argument("--antenna", metavar="ID|NAME", default="",
+                   help="Antenna from [antennas] in ~/.wavelog.conf for the QSO comment")
     p.add_argument("--version", action="version", version="pota2wavelog 2.0")
 
     args = p.parse_args()
     cfg  = ensure_config(load_config())
     cfg["main_callsign"] = cfg["callsign"]   # the call the main qrz_api_key belongs to
+
+    for flag, kind, wanted in (("--rig", "rigs", args.rig), ("--antenna", "antennas", args.antenna)):
+        if wanted and cfg[kind] and resolve_setup_item(cfg[kind], wanted) is None:
+            known = ", ".join(cfg[kind])
+            print(f"✗ {flag} {wanted}: not in [{kind}] of ~/.wavelog.conf (known: {known})")
+            sys.exit(1)
 
     if args.adif:
         adif_path = Path(args.adif)
@@ -1371,7 +1500,8 @@ def main():
             print(f"✗ File not found: {adif_path}"); sys.exit(1)
         adif_mode(cfg, str(adif_path),
                   manual_locator=args.locator.upper(),
-                  merge_distance_km=args.merge_distance)
+                  merge_distance_km=args.merge_distance,
+                  rig=args.rig, antenna=args.antenna)
     elif args.refs:
         refs = [r.strip().upper().replace("POTA ","") for r in args.refs if r.strip()]
         sid = process_parks(cfg, refs, manual_locator=args.locator.upper())

@@ -93,6 +93,8 @@ Pass a single activation or an N-fer directly on the command line. The script fe
 | `POTA-REF ...` | One or more POTA references (e.g. `DE-0034` or `DE-0034 DE-1197`) |
 | `--locator LOCATOR` | Override locator manually — takes priority over ADIF and GPS |
 | `--merge-distance KM` | Maximum distance for GPS drift detection in ADIF mode (default: 5 km) |
+| `--rig ID\|NAME` | Rig for the QSO comment, from `[rigs]` in `~/.wavelog.conf` (default: ask) |
+| `--antenna ID\|NAME` | Antenna for the QSO comment, from `[antennas]` (default: ask) |
 | `--version` | Show version and exit |
 
 ```bash
@@ -234,6 +236,45 @@ If the file also contains the real GPS locator for the same refs, none of this i
 ```
 
 ---
+
+## 📻 Rig and antenna in the QSO comment
+
+In ADIF mode the QSOs can carry your rig and antenna, as two tags in the comment that
+[wavelog-qsl-convert](http://git.sammet.me:3000/hamradio/wavelog-qsl-convert) prints on the QSL card:
+
+```
+Tnx fer QSO [antenna] Vertical Dipole - 4m high [rig] Yaesu FT-891
+```
+
+List what you own once in `~/.wavelog.conf` (the key is a short id, the value is what goes on the card):
+
+```ini
+[rigs]
+ft891 = Yaesu FT-891
+ic705 = Icom IC-705 (5 W)
+
+[antennas]
+vdipole = Vertical Dipole - 4m high
+efhw    = EFHW 20m
+
+# optional: preselected in the question
+[setup]
+rig     = ft891
+antenna = vdipole
+```
+
+Before each import the script asks which rig and which antenna you used (Enter = the preselected one,
+a LogDeck dialog in LogDeck). With only one entry in a list it is used without asking; with no `[rigs]` /
+`[antennas]` nothing is written. To skip the question pass them directly:
+
+```bash
+python3 pota2wavelog.py --adif activation.adi --rig ft891 --antenna efhw
+```
+
+- An existing comment stays in front of the tags; old `[antenna]`/`[rig]` tags are replaced, so importing
+  the same file twice never duplicates them.
+- `[` and `]` inside a name become `(` `)` — brackets delimit the tags.
+- `--rig` / `--antenna` accept the id or the name; an unknown one is rejected if the list exists.
 
 ## 📛 Station naming
 
